@@ -3,9 +3,7 @@
 # Author: Bowen Deng
 
 """
-Rebuilds each confirmed root_id's COMPLETE shape from the never-filtered
-pre-filter slabs kept on disk, not contact_filter.py's trimmed sliver.
-Writes interaction_labels_full_mask.tif (loose) and "strict_view/" (proofread).
+Rebuild full mask label volumes from pre-filter slabs for loose and proofread views.
 """
 
 import argparse

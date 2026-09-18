@@ -3,7 +3,7 @@
 # Author: Bowen Deng
 
 """
-3D renders using each root_id's complete shape (not the trimmed sliver). Same style and camera as render_contact_meshes.py.
+Render 3D static scenes for full-mask meshes.
 """
 
 import argparse
@@ -28,10 +28,12 @@ NEURON_COLOR = (0.13, 0.7, 0.3)
 
 
 def _load_merged(paths: list[str], decimate_target_reduction: float = 0.0, label: str = "") -> pv.PolyData | None:
-    """decimate_target_reduction > 0 simplifies each mesh on load: the
+    """
+    decimate_target_reduction > 0 simplifies each mesh on load: the
     full-mask meshes can be tens of GB per category, easily OOMing an
     undecimated merge; fine since this is a display render, not a
-    measurement. Prints progress every 100 meshes."""
+    measurement. Prints progress every 100 meshes.
+    """
     t0 = time.time()
     meshes = []
     for i, path in enumerate(paths):

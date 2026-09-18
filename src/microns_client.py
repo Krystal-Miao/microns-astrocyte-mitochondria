@@ -2,10 +2,10 @@
 # Copyright (c) QuIN Lab, University of Waterloo. All rights reserved.
 # Author: Bowen Deng
 
-"""Thin CAVEclient+CloudVolume wrapper for minnie65_public, holding every
-dataset-metadata value (resolutions, bounds, timestamps) the pipeline
-treats as ground truth. Nothing here hard-codes a coordinate constant --
-all of it is read live from CloudVolume and CAVE (see README.md)."""
+"""
+CAVEclient and CloudVolume wrapper for accessing MICrONS dataset metadata and volumes.
+"""
+
 from __future__ import annotations
 
 import numpy as np
@@ -102,10 +102,12 @@ class MicronsClient:
         self.seg_dtype_itemsize = np.dtype(self.seg_cv.dtype).itemsize
 
     def get_mesh(self, root_id: int):
-        """Raw CloudVolume Mesh for one root_id (handles both the {id: Mesh}
+        """
+        Raw CloudVolume Mesh for one root_id (handles both the {id: Mesh}
         dict and bare-Mesh return conventions). One id per call, not a
         batch: the legacy unsharded mesh source's get() defaults to
-        fuse=True, silently MERGING every requested segid's geometry."""
+        fuse=True, silently MERGING every requested segid's geometry.
+        """
         mesh_result = self.seg_cv.mesh.get(root_id)
         if isinstance(mesh_result, dict):
             if root_id not in mesh_result:
@@ -117,7 +119,8 @@ class MicronsClient:
         return mesh_result
 
     def get_mesh_vertices_nm(self, root_id: int) -> np.ndarray:
-        """Fetch the full mesh for root_id and return its vertices as an
+        """
+        Fetch the full mesh for root_id and return its vertices as an
         (N, 3) float64 array in physical nanometers, XYZ order.
         """
         mesh = self.get_mesh(root_id)
@@ -129,7 +132,8 @@ class MicronsClient:
         return vertices
 
     def download_em(self, bbox_min_vx: np.ndarray, bbox_max_vx: np.ndarray) -> np.ndarray:
-        """Download the EM subvolume for [bbox_min_vx, bbox_max_vx) (XYZ,
+        """
+        Download the EM subvolume for [bbox_min_vx, bbox_max_vx) (XYZ,
         voxel indices, exclusive max). Returns the raw CloudVolume array
         (X, Y, Z, C); axis normalization happens in coordinate_utils.
         """
@@ -141,11 +145,13 @@ class MicronsClient:
         return np.asarray(self.em_cv.download(sl))
 
     def download_segmentation(self, bbox_min_vx: np.ndarray, bbox_max_vx: np.ndarray) -> np.ndarray:
-        """Segmentation subvolume for the same region. For a dynamic
+        """
+        Segmentation subvolume for the same region. For a dynamic
         graphene source, agglomerates at the pinned materialization
         version's timestamp (keeps root_ids consistent with the
         proofreading table, not the current live state); a static
-        precomputed snapshot needs no such kwargs."""
+        precomputed snapshot needs no such kwargs.
+        """
         sl = np.s_[
             bbox_min_vx[0] : bbox_max_vx[0],
             bbox_min_vx[1] : bbox_max_vx[1],

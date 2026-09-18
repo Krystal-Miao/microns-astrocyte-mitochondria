@@ -3,11 +3,7 @@
 # Author: Bowen Deng
 
 """
-How many loose (200nm-confirmed) contacts survive at 40, 50, 60, 70, and 80nm.
-Reads each id's COMPLETE shape from interaction_labels_full_mask.tif (built by
-build_full_mask_labels.py) and bins per-voxel distance into a per-local_id 5nm
-histogram (0-80nm), so any threshold answers via cumsum without saving a full
-distance volume.
+Analyze contact distance threshold sensitivity by binning per-voxel physical distances into histograms.
 """
 
 import json

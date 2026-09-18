@@ -3,8 +3,7 @@
 # Author: Bowen Deng
 
 """
-2D EM+label overlays from build_full_mask_labels.py's full-mask tifs
-(complete shapes, not the trimmed sliver).
+Build 2D EM and label overlay stacks from full mask label volumes.
 """
 
 import argparse

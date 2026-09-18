@@ -2,8 +2,11 @@
 # Copyright (c) QuIN Lab, University of Waterloo. All rights reserved.
 # Author: Bowen Deng
 
-"""CLI entry point; see README's Usage section for commands, the
---data-dir design, and how output is laid out under it."""
+"""
+CLI entry point; see README's Usage section for commands, the
+--data-dir design, and how output is laid out under it.
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -258,7 +261,8 @@ def _format_duration(seconds: float) -> str:
 
 
 def cmd_status(data_dir: str, root_id: int):
-    """Report chunked-extraction progress for root_id, reading only local
+    """
+    Report chunked-extraction progress for root_id, reading only local
     files; no CAVE or CloudVolume connection needed.
     """
     out_dir = os.path.join(data_dir, f"astro_{root_id}")
@@ -304,7 +308,8 @@ def cmd_status(data_dir: str, root_id: int):
 
 
 def _discover_astro_dirs_with_metadata(output_root: str):
-    """Yield (root_id, out_dir) for every astro_<root_id> directory directly
+    """
+    Yield (root_id, out_dir) for every astro_<root_id> directory directly
     under output_root that has a metadata.json.
     """
     if not os.path.isdir(output_root):
@@ -323,9 +328,11 @@ def _discover_astro_dirs_with_metadata(output_root: str):
 
 
 def _discover_astro_dirs_with_run_marker(output_root: str, marker_filename: str):
-    """(root_id, out_dir) for every astro_<root_id> dir whose latest
+    """
+    (root_id, out_dir) for every astro_<root_id> dir whose latest
     "runs/<date>/" (or flat out_dir, pre-"runs/" convention) has
-    marker_filename; backs every --all-fetched flow."""
+    marker_filename; backs every --all-fetched flow.
+    """
     for root_id, out_dir in _discover_astro_dirs_with_metadata(output_root):
         if io_utils.latest_run_dir(out_dir, marker_filename) is not None:
             yield root_id, out_dir

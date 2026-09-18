@@ -3,7 +3,7 @@
 # Author: Bowen Deng
 
 """
-Static 3D renders of loose and proofread contact scenes from mesh_export's .ply files.
+Render 3D static scenes for loose and proofread contact meshes.
 """
 
 import argparse
@@ -29,7 +29,9 @@ NEURON_COLOR = (0.13, 0.7, 0.3)
 
 
 def _load_merged(paths: list[str]) -> pv.PolyData | None:
-    """Merges one category's meshes into one PolyData: one draw call instead of ~1,400."""
+    """
+    Merges one category's meshes into one PolyData: one draw call instead of one per mesh.
+    """
     meshes = []
     for path in paths:
         mesh = pv.read(path)

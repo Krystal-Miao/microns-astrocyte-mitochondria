@@ -2,11 +2,9 @@
 # Copyright (c) QuIN Lab, University of Waterloo. All rights reserved.
 # Author: Bowen Deng
 
-"""The real gate on interaction_labels.tif's CANDIDATE volume (labeled by
-volume_extractor for anything merely nearby; only ~4% is real contact):
-zeroes any non-target voxel not within threshold_nm of the target's own
-mask.tif. Streaming, Z-chunked, and resumable, haloed so the distance transform
-sees mask voxels past each chunk edge."""
+"""
+Distance-based contact filtering for interaction labels against target astrocyte mask.
+"""
 from __future__ import annotations
 
 import math
@@ -48,10 +46,9 @@ def safe_contact_filter_chunk_and_tile_voxels(
     configured_max_tile_xy_voxels: int | None = None,
     safety_factor: float = 0.8,
 ) -> tuple[int, int, int]:
-    """(chunk_z, tile_y, tile_x) sized so one haloed working set fits
-    max_memory_gb: shrinking chunk_z alone isn't enough for a wide-XY
-    bbox, so this also shrinks the XY tile: halves both tile dims until a
-    chunk_z=1 haloed tile fits, then grows chunk_z within what's left."""
+    """
+    Calculate safe chunk and tile dimensions to fit within memory limits.
+    """
     res_x, res_y, res_z = (float(v) for v in resolution_nm_xyz)
     halo_z = _halo_z_voxels(threshold_nm, res_z)
     halo_y = _halo_z_voxels(threshold_nm, res_y)
@@ -89,11 +86,9 @@ def filter_interaction_labels_by_contact(
     tile_y_voxels: int | None = None,
     tile_x_voxels: int | None = None,
 ) -> set[int]:
-    """Zeroes, in place, every voxel not target_local_id and not within
-    threshold_nm of mask_path's True voxels. Returns surviving local_ids.
-    Chunked in Z, tiled in Y and X, each independently haloed. Resumable: a
-    request_key mismatch (incl. tile shape) forces a clean restart;
-    otherwise progress checkpoints per chunk and re-filtering is idempotent."""
+    """
+    Filter interaction labels by physical distance threshold to the target mask in place.
+    """
     prog_path = contact_filter_progress_path(run_dir)
     progress = io_utils.load_progress(prog_path)
 

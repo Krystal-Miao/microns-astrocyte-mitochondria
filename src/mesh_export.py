@@ -2,11 +2,10 @@
 # Copyright (c) QuIN Lab, University of Waterloo. All rights reserved.
 # Author: Bowen Deng
 
-"""Per-cell 3D mesh export, scoped to exactly interaction_label_map.json's
-root_ids; never "every mesh in the segmentation" (hundreds of thousands
-of objects). Also provides reconstruct_local_meshes, a network-free
-marching-cubes alternative to fetching CAVE's official per-root_id mesh
-(~9-12s each, network-bound); see its own docstring for the tradeoff."""
+"""
+3D mesh export and local marching-cubes reconstruction for interacting cells.
+"""
+
 from __future__ import annotations
 
 import json
@@ -20,8 +19,10 @@ from . import io_utils
 
 
 def _mesh_category(entry: dict) -> str:
-    """4-way bucket: target astrocyte, other astrocyte, neuron (any
-    compartment), dendrite fallback for anything unclassified."""
+    """
+    4-way bucket: target astrocyte, other astrocyte, neuron (any
+    compartment), dendrite fallback for anything unclassified.
+    """
     if entry.get("is_target_astrocyte"):
         return "target_astrocyte"
     if entry.get("classification_system") in ("excitatory_neuron", "inhibitory_neuron"):
@@ -32,11 +33,13 @@ def _mesh_category(entry: dict) -> str:
 
 
 def fetch_interacting_meshes(client, run_dir: str, mesh_dir_name: str = "meshes", skip_existing: bool = True):
-    """Fetch+save one .ply per root_id in interaction_label_map.json, under
+    """
+    Fetch+save one .ply per root_id in interaction_label_map.json, under
     "run_dir/<mesh_dir_name>/{target_astrocyte,astrocyte,dendrite}/<id>.ply".
     skip_existing=True treats a complete file as permanently done (mesh
     geometry for a fixed root_id and segmentation never changes). Returns
-    (root_id, category, status) tuples."""
+    (root_id, category, status) tuples.
+    """
     id_map = io_utils.load_interaction_label_map(run_dir)
     if id_map is None:
         raise ValueError(f"No interaction_label_map.json under {run_dir} -- run extract-interaction-labels first.")
@@ -70,7 +73,8 @@ def fetch_interacting_meshes(client, run_dir: str, mesh_dir_name: str = "meshes"
 
 
 def _write_ply_ascii(path: str, vertices: np.ndarray, faces: np.ndarray):
-    """Minimal ASCII PLY writer (vertices only, no normals or color); avoids
+    """
+    Minimal ASCII PLY writer (vertices only, no normals or color); avoids
     adding a trimesh dependency for what's otherwise a two-array dump.
     vertices: (N, 3) float, already in (x, y, z) nm order. faces: (M, 3) int
     vertex indices.
@@ -93,9 +97,11 @@ def _write_ply_ascii(path: str, vertices: np.ndarray, faces: np.ndarray):
 
 
 def _build_downsampled_label_volume(label_path: str, downsample: int, chunk_z: int = 64) -> np.ndarray:
-    """Reads interaction_labels.tif in Z-chunks (never the full, often
+    """
+    Reads interaction_labels.tif in Z-chunks (never the full, often
     >100GB, volume in RAM), returns it downsampled `downsample`x in Y and X only
-    (Z stays native); small enough at 10x (~1-2GB) to hold whole."""
+    (Z stays native); small enough at 10x to hold whole.
+    """
     label_arr = tifffile.memmap(label_path)
     nz, ny, nx = label_arr.shape
     bytes_per_plane = ny * nx * label_arr.dtype.itemsize
@@ -138,10 +144,12 @@ def reconstruct_local_meshes(
     min_voxels: int = 4,
     skip_existing: bool = True,
 ):
-    """Network-free alternative to fetch_interacting_meshes: marching cubes
+    """
+    Network-free alternative to fetch_interacting_meshes: marching cubes
     on interaction_labels.tif, truncated at the bbox edge, unlike CAVE's
     official mesh. A thin fragment can vanish under Y and X downsampling
-    (-> "SKIPPED"). Returns (root_id, category, status) tuples."""
+    (-> "SKIPPED"). Returns (root_id, category, status) tuples.
+    """
     from scipy import ndimage
     from skimage import measure
 
@@ -186,8 +194,8 @@ def reconstruct_local_meshes(
 
     # One linear pass over the whole (already-downsampled) volume finds
     # every label's bounding box at once; scanning the full array
-    # per-entry instead (~2000 entries for 864691136057675736) would cost
-    # ~2000x more array-scanning for no reason.
+    # per-entry instead would cost one full-array pass per label for no
+    # reason.
     max_local_id = max(e["local_id"] for e in id_map)
     bboxes = ndimage.find_objects(ds_labels, max_label=max_local_id)
 

@@ -2,11 +2,10 @@
 # Copyright (c) QuIN Lab, University of Waterloo. All rights reserved.
 # Author: Bowen Deng
 
-"""Classifies cells near an astrocyte's bbox as astrocyte or neuron via three
-layers: soma proximity, synapse tags (alone, NOT sufficient for "neuron"),
-and bbox-segmentation classification (the only one catching axon-astrocyte
-contact), each with a loose view and a strict (proofread) view. Real contact
-is decided downstream by contact_filter.py; this module only classifies identity."""
+"""
+Cell classification and interaction querying near an astrocyte bounding box.
+"""
+
 from __future__ import annotations
 
 import logging
@@ -58,9 +57,11 @@ def default_categories() -> dict:
 
 
 def cell_category(cell_type: str | None, proofread_clean: bool | None, require_astrocyte_proofread: bool = False) -> str | None:
-    """Category for a soma-proximity cell. require_astrocyte_proofread=True
+    """
+    Category for a soma-proximity cell. require_astrocyte_proofread=True
     additionally requires proofread_clean is True (manually verified on the
-    same table the target astrocyte list is drawn from)."""
+    same table the target astrocyte list is drawn from).
+    """
     cat = CELL_TYPE_CATEGORY.get(cell_type)
     if cat == "astrocyte" and require_astrocyte_proofread and proofread_clean is not True:
         return None
@@ -73,9 +74,11 @@ def synapse_post_category(compartment_tag: str | None) -> str | None:
 
 
 def bbox_min_max_nm_from_metadata(metadata: dict) -> tuple[list[float], list[float]]:
-    """mesh_bbox_nm is only populated on an astrocyte's first extraction run;
+    """
+    mesh_bbox_nm is only populated on an astrocyte's first extraction run;
     a resumed run re-saves metadata.json with it None. voxel_bbox *
-    em_resolution_nm reconstructs the same physical bbox either way."""
+    em_resolution_nm reconstructs the same physical bbox either way.
+    """
     mesh_bbox = metadata.get("mesh_bbox_nm") or {}
     if mesh_bbox.get("min") is not None and mesh_bbox.get("max") is not None:
         return mesh_bbox["min"], mesh_bbox["max"]
@@ -95,9 +98,11 @@ def _nm_to_table_voxels(bbox_min_nm, bbox_max_nm, table_voxel_resolution_nm):
 
 
 def _query_table_in_batches(cave_client, table_name: str, materialization_version: int, column: str, values, batch_size: int = _QUERY_BATCH_SIZE) -> pd.DataFrame:
-    """filter_in_dict query chunked into batches (a real astrocyte bbox can
+    """
+    filter_in_dict query chunked into batches (a real astrocyte bbox can
     imply 100k+ ids; see interaction_query module docstring), each through
-    retry_with_backoff with a small delay between batches."""
+    retry_with_backoff with a small delay between batches.
+    """
     values = list(values)
     if not values:
         return pd.DataFrame()
@@ -132,7 +137,9 @@ def nucleus_table_voxel_resolution_nm(cave_client, materialization_version: int)
 
 
 def query_real_cells_in_bbox(cave_client, materialization_version: int, bbox_min_nm, bbox_max_nm, table_voxel_resolution_nm=None) -> pd.DataFrame:
-    """Nuclei whose centroid falls inside the bbox (server-side spatial query)."""
+    """
+    Nuclei whose centroid falls inside the bbox (server-side spatial query).
+    """
     if table_voxel_resolution_nm is None:
         table_voxel_resolution_nm = nucleus_table_voxel_resolution_nm(cave_client, materialization_version)
     bbox_vx_min, bbox_vx_max = _nm_to_table_voxels(bbox_min_nm, bbox_max_nm, table_voxel_resolution_nm)
@@ -148,8 +155,10 @@ def query_real_cells_in_bbox(cave_client, materialization_version: int, bbox_min
 
 
 def annotate_cell_types(cave_client, materialization_version: int, nucleus_ids) -> pd.DataFrame:
-    """Cell type per nucleus id: PRIMARY_CELLTYPE_TABLE first, FALLBACK_NONNEURONAL_TABLE
-    for whatever it didn't cover. Indexed by nucleus id; a missing index means type unknown."""
+    """
+    Cell type per nucleus id: PRIMARY_CELLTYPE_TABLE first, FALLBACK_NONNEURONAL_TABLE
+    for whatever it didn't cover. Indexed by nucleus id; a missing index means type unknown.
+    """
     nucleus_ids = list(int(i) for i in nucleus_ids)
     if not nucleus_ids:
         return pd.DataFrame(columns=["classification_system", "cell_type", "source"]).set_index(pd.Index([], name="target_id"))
@@ -177,9 +186,11 @@ def annotate_cell_types(cave_client, materialization_version: int, nucleus_ids) 
 
 
 def find_cells_in_bbox(cave_client, materialization_version: int, root_id: int, bbox_min_nm, bbox_max_nm, clean_astrocyte_root_ids: set | None = None) -> list:
-    """Cells whose soma sits in the bbox, typed via annotate_cell_types.
+    """
+    Cells whose soma sits in the bbox, typed via annotate_cell_types.
     clean_astrocyte_root_ids tags each astrocyte-typed hit's proofread_clean;
-    None skips it (stays None)."""
+    None skips it (stays None).
+    """
     table_res = nucleus_table_voxel_resolution_nm(cave_client, materialization_version)
     nuclei_df = query_real_cells_in_bbox(cave_client, materialization_version, bbox_min_nm, bbox_max_nm, table_voxel_resolution_nm=table_res)
     types_df = annotate_cell_types(cave_client, materialization_version, nuclei_df["id"].tolist())
@@ -220,7 +231,9 @@ def synapse_table_voxel_resolution_nm(cave_client, materialization_version: int)
 
 
 def query_synapses_in_bbox(cave_client, materialization_version: int, bbox_min_nm, bbox_max_nm, table_voxel_resolution_nm=None) -> pd.DataFrame:
-    """Synapses whose center point falls inside the bbox (server-side spatial query)."""
+    """
+    Synapses whose center point falls inside the bbox (server-side spatial query).
+    """
     if table_voxel_resolution_nm is None:
         table_voxel_resolution_nm = synapse_table_voxel_resolution_nm(cave_client, materialization_version)
     bbox_vx_min, bbox_vx_max = _nm_to_table_voxels(bbox_min_nm, bbox_max_nm, table_voxel_resolution_nm)
@@ -236,8 +249,10 @@ def query_synapses_in_bbox(cave_client, materialization_version: int, bbox_min_n
 
 
 def annotate_synapse_compartments(cave_client, materialization_version: int, synapse_ids) -> pd.DataFrame:
-    """Compartment tag per synapse id: VORTEX_COMPARTMENT_TABLE (manual) first,
-    SYNAPSE_STRUCTURE_TABLE (model, mapped via _STRUCTURE_VALUE_TO_TAG) as fallback."""
+    """
+    Compartment tag per synapse id: VORTEX_COMPARTMENT_TABLE (manual) first,
+    SYNAPSE_STRUCTURE_TABLE (model, mapped via _STRUCTURE_VALUE_TO_TAG) as fallback.
+    """
     synapse_ids = list(int(i) for i in synapse_ids)
     if not synapse_ids:
         return pd.DataFrame(columns=["compartment_tag", "source"]).set_index(pd.Index([], name="target_id"))
@@ -264,8 +279,10 @@ def annotate_synapse_compartments(cave_client, materialization_version: int, syn
 
 
 def find_synapses_in_bbox(cave_client, materialization_version: int, root_id: int, bbox_min_nm, bbox_max_nm) -> list:
-    """Synapses in the bbox with compartment tag and postsynaptic category.
-    pre_root_id is recorded but never categorized (always an axon terminal)."""
+    """
+    Synapses in the bbox with compartment tag and postsynaptic category.
+    pre_root_id is recorded but never categorized (always an axon terminal).
+    """
     table_res = synapse_table_voxel_resolution_nm(cave_client, materialization_version)
     syn_df = query_synapses_in_bbox(cave_client, materialization_version, bbox_min_nm, bbox_max_nm, table_voxel_resolution_nm=table_res)
     if syn_df.empty:
@@ -307,11 +324,13 @@ def find_synapses_in_bbox(cave_client, materialization_version: int, root_id: in
 
 
 def classify_root_ids_by_celltype(cave_client, materialization_version: int, root_ids) -> pd.DataFrame:
-    """Cell-type lookup for arbitrary root_ids via root_id -> NUCLEUS_TABLE ->
+    """
+    Cell-type lookup for arbitrary root_ids via root_id -> NUCLEUS_TABLE ->
     annotate_cell_types. Absent from the index = no detected nucleus at all
     (genuinely unknown, not "unclassified"; see root_id_category). Nuclei
     disagreeing on type (a real soma-soma merge) get reported ambiguous
-    rather than an arbitrary pick."""
+    rather than an arbitrary pick.
+    """
     root_ids = sorted(set(int(r) for r in root_ids))
     empty_cols = ["nucleus_id", "classification_system", "cell_type", "cell_type_source", "ambiguous_multi_nucleus"]
     if not root_ids:
@@ -346,19 +365,23 @@ def classify_root_ids_by_celltype(cave_client, materialization_version: int, roo
 
 
 def root_id_category(classification_system: str | None, cell_type: str | None) -> str | None:
-    """Category for a root_id classified by classify_root_ids_by_celltype.
+    """
+    Category for a root_id classified by classify_root_ids_by_celltype.
     Neuron keys off classification_system (stable and coarse vs. the open-ended cell_type
     subtype list); astrocyte keys off cell_type via CELL_TYPE_CATEGORY. Every other
-    nonneuron cell_type (oligo, microglia, pericyte, OPC) stays uncategorized."""
+    nonneuron cell_type (oligo, microglia, pericyte, OPC) stays uncategorized.
+    """
     if classification_system in NEURON_CLASSIFICATION_SYSTEMS:
         return "neuron"
     return CELL_TYPE_CATEGORY.get(cell_type)
 
 
 def find_bbox_segmentation_cells(cave_client, materialization_version: int, root_id: int, candidate_root_ids) -> list:
-    """classify_root_ids_by_celltype reshaped into find_cells_in_bbox's record
+    """
+    classify_root_ids_by_celltype reshaped into find_cells_in_bbox's record
     shape. candidate_root_ids is volume_extractor.enumerate_root_ids_in_bbox's
-    output (every root_id with >=min_voxels in the bbox segmentation)."""
+    output (every root_id with >=min_voxels in the bbox segmentation).
+    """
     root_id = int(root_id)
     types_df = classify_root_ids_by_celltype(cave_client, materialization_version, candidate_root_ids)
 
@@ -381,10 +404,12 @@ def find_bbox_segmentation_cells(cave_client, materialization_version: int, root
 
 
 def query_neuron_proofreading_status(cave_client, materialization_version: int, root_ids) -> pd.DataFrame:
-    """Neuron proofreading status from NEURON_PROOFREADING_TABLE, indexed by root_id
+    """
+    Neuron proofreading status from NEURON_PROOFREADING_TABLE, indexed by root_id
     with columns status_axon, status_dendrite, strategy_axon, strategy_dendrite. A
     root_id absent from the index was never proofread as a neuron (genuinely unknown,
-    not False)."""
+    not False).
+    """
     root_ids = sorted(set(int(r) for r in root_ids))
     empty_cols = ["status_axon", "status_dendrite", "strategy_axon", "strategy_dendrite"]
     if not root_ids:
@@ -401,9 +426,11 @@ def query_neuron_proofreading_status(cave_client, materialization_version: int, 
 
 
 def neuron_proofread_root_ids(proofreading_df: pd.DataFrame, require_axon: bool = True) -> set:
-    """Strict-view root_id set: status_dendrite True always required, status_axon True
+    """
+    Strict-view root_id set: status_dendrite True always required, status_axon True
     also required by default (require_axon=True) since this layer doesn't know which
-    compartment actually touches the target astrocyte."""
+    compartment actually touches the target astrocyte.
+    """
     if proofreading_df.empty:
         return set()
     mask = proofreading_df["status_dendrite"] == True  # noqa: E712
@@ -419,11 +446,13 @@ def compute_interacting_root_ids(
     require_astrocyte_proofread: bool = False, bbox_segmentation_cells: list | None = None,
     require_neuron_proofread: bool = False, neuron_proofread_root_ids: set | None = None,
 ) -> list:
-    """Deduped, category-filtered interacting root_ids from already-computed
+    """
+    Deduped, category-filtered interacting root_ids from already-computed
     layers; category recomputed from raw fields (not
     cached) to stay current. require_*_proofread narrows to the strict view
     (call twice for both). A dendrite tag alone does NOT grant "neuron":
-    only bbox_segmentation_cells' classification does (a tag-only rule let an oligodendrocyte through)."""
+    only bbox_segmentation_cells' classification does (a tag-only rule let an oligodendrocyte through).
+    """
     if categories is None:
         categories = default_categories()
     root_id = int(root_id)
@@ -452,11 +481,13 @@ def compute_interacting_root_ids(
 
 
 def find_interactions(cave_client, materialization_version: int, root_id: int, bbox_min_nm, bbox_max_nm, categories: dict | None = None, clean_astrocyte_root_ids: set | None = None) -> dict:
-    """Layers 1-2 (soma proximity + synapse compartment) only, a preview
+    """
+    Layers 1-2 (soma proximity + synapse compartment) only, a preview
     main.py's cmd_find_interactions overwrites after adding layer 3 (bbox
     segmentation) and neuron-proofreading via a second
     compute_interacting_root_ids call. interacting_root_ids_proofread is
-    always a subset of interacting_root_ids."""
+    always a subset of interacting_root_ids.
+    """
     if categories is None:
         categories = default_categories()
 

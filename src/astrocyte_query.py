@@ -2,10 +2,10 @@
 # Copyright (c) QuIN Lab, University of Waterloo. All rights reserved.
 # Author: Bowen Deng
 
-"""Query proofread astrocyte root_ids from the CAVE materialization table,
-via the generic query_table API (not the tutorial's tables.<name>(...)
-shortcut) with the table name verified against get_tables() first, so a
-future rename fails loudly instead of silently returning nothing."""
+"""
+Query proofread astrocyte root_ids from the CAVE materialization table.
+"""
+
 from __future__ import annotations
 
 import pandas as pd
@@ -19,8 +19,10 @@ def _find_table_candidates(available_tables, configured_name: str):
 
 
 def query_clean_astrocytes(cave_client, materialization_version: int, table_name: str, status_value: str = "clean") -> pd.DataFrame:
-    """Rows from the astrocyte proofreading-status table matching
-    status_value (default 'clean'); has a 'pt_root_id' column."""
+    """
+    Rows from the astrocyte proofreading-status table matching
+    status_value (default 'clean'); has a 'pt_root_id' column.
+    """
     available_tables = cave_client.materialize.get_tables(version=materialization_version)
 
     if table_name not in available_tables:
@@ -55,7 +57,8 @@ def query_clean_astrocytes(cave_client, materialization_version: int, table_name
 
 
 def resolve_root_ids(manual_root_ids, use_query: bool, clean_df: pd.DataFrame | None) -> list:
-    """Combine manually-supplied root_ids with query results (if requested),
+    """
+    Combine manually-supplied root_ids with query results (if requested),
     de-duplicated, preserving manual ids first.
     """
     root_ids = [int(r) for r in manual_root_ids]

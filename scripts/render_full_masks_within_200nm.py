@@ -3,9 +3,7 @@
 # Author: Bowen Deng
 
 """
-Renders contact scenes from each root_id's COMPLETE shape (never-filtered
-pre-filter slabs on disk), not interaction_labels.tif's trimmed sliver.
-Streams those slabs once, downsampling Y and X, building both volumes together.
+Render contact scenes from full-mask pre-filter slabs downsampled in Y and X.
 """
 
 import glob
@@ -75,10 +73,12 @@ def _slab_z_range(path: str) -> tuple[int, int]:
 
 
 def build_category_volumes(loose_lut: np.ndarray, strict_lut: np.ndarray, metadata_path: str, slabs_dir: str):
-    """One pass over every pre-filter slab: downsample Y and X, remap through
+    """
+    One pass over every pre-filter slab: downsample Y and X, remap through
     both LUTs, accumulate two (nz_total, ny_ds, nx_ds) uint8 category
     volumes. Z is kept at native resolution (matches mesh_export.py's
-    downsampling convention)."""
+    downsampling convention).
+    """
     with open(metadata_path) as f:
         bbox_min_z = int(json.load(f)["voxel_bbox"]["min"][2])
 

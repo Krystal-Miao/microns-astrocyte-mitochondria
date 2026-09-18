@@ -2,11 +2,10 @@
 # Copyright (c) QuIN Lab, University of Waterloo. All rights reserved.
 # Author: Bowen Deng
 
-"""Core per-astrocyte extraction: mesh -> bbox -> safety check (BEFORE any
-download) -> download EM+segmentation -> binary mask -> validation.
-extract_chunked_streaming fetches one slab's EM+seg concurrently but
-processes slabs strictly one at a time (concurrent slabs oversubscribe the
-HTTP pool); extract_interaction_labels_chunked stays fully sequential."""
+"""
+Volume extraction module for downloading EM and segmentation subvolumes and building binary masks.
+"""
+
 from __future__ import annotations
 
 import concurrent.futures as cf
@@ -32,7 +31,8 @@ class AstrocyteNotFoundError(Exception):
 
 
 def estimate_bytes(n_voxels: int, em_itemsize: int, seg_itemsize: int, mask_itemsize: int = 1) -> int:
-    """Peak in-memory bytes needed while both EM and segmentation blocks (plus
+    """
+    Peak in-memory bytes needed while both EM and segmentation blocks (plus
     the derived mask) are held at once for a region of n_voxels voxels.
     """
     return n_voxels * (em_itemsize + seg_itemsize + mask_itemsize)
@@ -119,9 +119,11 @@ def retry_with_backoff(fn, max_attempts: int = 5, base_delay_s: float = 8.0, des
 
 
 def safe_chunk_z_voxels(bbox_min_vx, bbox_max_vx, budget_voxels: int, configured_max_chunk_z: int, safety_factor: float = 0.8) -> int:
-    """Z-slab thickness that keeps one XY-footprint-sized slab within
+    """
+    Z-slab thickness that keeps one XY-footprint-sized slab within
     budget_voxels regardless of XY extent; a fixed config chunk_z_voxels
-    alone is only safe for small footprints."""
+    alone is only safe for small footprints.
+    """
     nx = int(bbox_max_vx[0] - bbox_min_vx[0])
     ny = int(bbox_max_vx[1] - bbox_min_vx[1])
     per_slice_voxels = max(nx * ny, 1)
@@ -130,7 +132,8 @@ def safe_chunk_z_voxels(bbox_min_vx, bbox_max_vx, budget_voxels: int, configured
 
 
 def _download_em_and_seg(client, slab_min, slab_max, retry_max_attempts, retry_base_delay_s, slab_start, slab_end):
-    """Fetch one slab's EM and segmentation concurrently (two independent
+    """
+    Fetch one slab's EM and segmentation concurrently (two independent
     downloads; no reason to serialize them) and return both raw arrays.
     Runs inside a download-pool worker thread; see extract_chunked_streaming.
     """
@@ -272,10 +275,11 @@ def select_interaction_label_dtype(n_ids: int) -> np.dtype:
 
 
 def build_interaction_id_map(root_id: int, interacting_root_ids) -> dict:
-    """root_id -> local-integer-id map for the filtered label volume: target
+    """
+    root_id -> local-integer-id map for the filtered label volume: target
     astrocyte = 1, plus interacting_root_ids; fixed up front (not grown
-    while scanning slabs), since real bboxes have 60,000+ segment ids but
-    typically only tens to hundreds of cells of interest."""
+    while scanning slabs) so slab-scanning code can assume a stable id set.
+    """
     mapping = {int(root_id): 1}
     for rid in sorted(set(int(r) for r in interacting_root_ids)):
         if rid not in mapping:
@@ -285,8 +289,10 @@ def build_interaction_id_map(root_id: int, interacting_root_ids) -> dict:
 
 
 def remap_slab_to_known_ids(seg_zyx_slab: np.ndarray, sorted_root_ids: np.ndarray, sorted_local_ids: np.ndarray) -> np.ndarray:
-    """Remaps to a fixed, known-in-advance id set (no np.unique() needed):
-    any segment id not in sorted_root_ids maps to 0."""
+    """
+    Remaps to a fixed, known-in-advance id set (no np.unique() needed):
+    any segment id not in sorted_root_ids maps to 0.
+    """
     idx = np.searchsorted(sorted_root_ids, seg_zyx_slab)
     idx = np.minimum(idx, len(sorted_root_ids) - 1)
     is_match = sorted_root_ids[idx] == seg_zyx_slab
@@ -294,11 +300,13 @@ def remap_slab_to_known_ids(seg_zyx_slab: np.ndarray, sorted_root_ids: np.ndarra
 
 
 def extract_interaction_labels_chunked(client, root_id, bbox_min_vx, bbox_max_vx, chunk_z_voxels: int, out_dir: str, label_path: str, id_map: dict, dtype=INTERACTION_LABEL_DTYPE, retry_max_attempts: int = 5, retry_base_delay_s: float = 8.0, keep_slabs: bool = False):
-    """Builds interaction_labels.tif (target + id_map cells only),
+    """
+    Builds interaction_labels.tif (target + id_map cells only),
     re-downloading segmentation in Z-slabs. Resumable via its own progress
     file, keyed on id_map's root_id set so a changed interaction_analysis.json
     restarts cleanly. Sequential per-slab (segmentation only, no EM to
-    pair). Returns total Z slices written."""
+    pair). Returns total Z slices written.
+    """
     z0, z1 = int(bbox_min_vx[2]), int(bbox_max_vx[2])
     prog_path = io_utils.interaction_label_progress_path(out_dir)
 
@@ -387,10 +395,12 @@ def extract_interaction_labels_chunked(client, root_id, bbox_min_vx, bbox_max_vx
 
 
 def enumerate_root_ids_in_bbox(client, bbox_min_vx, bbox_max_vx, chunk_z_voxels: int, min_voxels: int, retry_max_attempts: int = 5, retry_base_delay_s: float = 8.0, progress_path: str | None = None) -> dict:
-    """Every root_id with >=min_voxels in the bbox's segmentation, mapped
+    """
+    Every root_id with >=min_voxels in the bbox's segmentation, mapped
     to voxel count, discovered via np.unique(return_counts=True)
     per Z-chunk, unlike extract_interaction_labels_chunked's known id set.
-    Resumable via progress_path; None skips persistence."""
+    Resumable via progress_path; None skips persistence.
+    """
     z0, z1 = int(bbox_min_vx[2]), int(bbox_max_vx[2])
     request_key = {
         "bbox_min_vx": [int(v) for v in bbox_min_vx],
@@ -457,7 +467,8 @@ def enumerate_root_ids_in_bbox(client, bbox_min_vx, bbox_max_vx, chunk_z_voxels:
 
 
 def _compute_extraction_budget(client, extraction_cfg: dict) -> int:
-    """Effective voxel budget (em+seg+mask) for the given config. Factored
+    """
+    Effective voxel budget (em+seg+mask) for the given config. Factored
     out so extract_astrocyte's resume shortcut and its fresh-mesh-lookup
     path compute this identically.
     """
@@ -470,11 +481,13 @@ def _compute_extraction_budget(client, extraction_cfg: dict) -> int:
 
 
 def extract_astrocyte(client, root_id: int, extraction_cfg: dict, out_paths: dict | None = None):
-    """Full extraction workflow for one root_id. out_paths (image and mask
+    """
+    Full extraction workflow for one root_id. out_paths (image and mask
     paths) is required for 'chunked' mode, which streams to disk and
     returns (None, None, info) with info['streamed_to_disk']=True. Resume
     shortcut: an existing _progress.json for this root_id re-reads the bbox
-    from it instead of recomputing from the mesh."""
+    from it instead of recomputing from the mesh.
+    """
     if extraction_cfg["mode"] == "chunked" and out_paths:
         out_dir = os.path.dirname(out_paths["image"])
         progress = io_utils.load_progress(io_utils.progress_path(out_dir))

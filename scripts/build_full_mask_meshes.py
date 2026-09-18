@@ -3,9 +3,7 @@
 # Author: Bowen Deng
 
 """
-3D meshes from build_full_mask_labels.py's COMPLETE-shape tifs.
-reconstruct_local_meshes hard-codes its input filename, so this symlinks a
-throwaway view dir's interaction_labels.tif to "../interaction_labels_full_mask.tif".
+Reconstruct 3D local meshes from full mask label volumes.
 """
 
 import argparse

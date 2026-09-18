@@ -3,10 +3,7 @@
 # Author: Bowen Deng
 
 """
-Saves extracted volumes, metadata, and QC previews and overlays to
-"outputs/astro_<root_id>/". Large-TIFF streaming functions read in Z-chunks
-via tifffile.memmap then release each chunk with madvise or fadvise
-DONTNEED, or RSS stays resident and can get the process OOM-killed.
+I/O utilities for saving volumes, metadata, previews, overlays, and progress tracking.
 """
 from __future__ import annotations
 
@@ -50,19 +47,23 @@ def run_date_today() -> str:
 
 
 def run_dir(out_dir: str, date_str: str | None = None) -> str:
-    """Holds every derived analysis output at "astro_<root_id>/runs/<date_str>/"
+    """
+    Holds every derived analysis output at "astro_<root_id>/runs/<date_str>/"
     (interactions, label volumes, overlays, meshes) for one dated pass, kept
     separate from the raw image.tif, mask.tif, and metadata.json so re-running
-    analysis never overwrites a previous run in place. Created if missing."""
+    analysis never overwrites a previous run in place. Created if missing.
+    """
     d = os.path.join(out_dir, RUNS_DIRNAME, date_str or run_date_today())
     os.makedirs(d, exist_ok=True)
     return d
 
 
 def latest_run_dir(out_dir: str, marker_filename: str) -> str | None:
-    """Most recent "runs/<date>/" dir containing marker_filename, newest first.
+    """
+    Most recent "runs/<date>/" dir containing marker_filename, newest first.
     Falls back to out_dir itself (pre-"runs/" layout) if found there instead.
-    None if not found in either place."""
+    None if not found in either place.
+    """
     runs_root = os.path.join(out_dir, RUNS_DIRNAME)
     if os.path.isdir(runs_root):
         for name in sorted(os.listdir(runs_root), reverse=True):
@@ -75,7 +76,9 @@ def latest_run_dir(out_dir: str, marker_filename: str) -> str | None:
 
 
 def resolve_script_dirs(run_dir_arg: str | None = None, data_dir_arg: str | None = None) -> tuple[str, str]:
-    """Resolves (out_dir, run_dir) pair from CLI arguments."""
+    """
+    Resolves (out_dir, run_dir) pair from CLI arguments.
+    """
     if run_dir_arg:
         r_dir = os.path.abspath(run_dir_arg)
         o_dir = data_dir_arg or os.path.dirname(os.path.dirname(r_dir))
@@ -153,8 +156,10 @@ def interaction_analysis_path(out_dir: str) -> str:
 
 
 def save_interaction_label_map(out_dir: str, entries: list):
-    """entries: one dict per labeled cell (local_id, root_id, cell_type,
-    classification_system, etc.; see interaction_query.py)."""
+    """
+    entries: one dict per labeled cell (local_id, root_id, cell_type,
+    classification_system, etc.; see interaction_query.py).
+    """
     save_progress(interaction_label_map_path(out_dir), {"entries": entries})
 
 
@@ -164,11 +169,13 @@ def load_interaction_label_map(out_dir: str):
 
 
 def clean_and_split_interaction_labels(run_dir: str, id_map: list, chunk_z: int = 8, compression: str = "zlib", skip_clean: bool = False) -> dict:
-    """Repair and export: zeroes orphan-labeled voxels (not in id_map) in place,
+    """
+    Repair and export: zeroes orphan-labeled voxels (not in id_map) in place,
     then writes COMPRESSED other_astrocyte_labels.tif and neuron_labels.tif
     (combined file stays uncompressed for memmap access). Three sequential
     single-chunk passes for a low memory ceiling. Not resumable but safe to
-    rerun; skip_clean=True skips zeroing."""
+    rerun; skip_clean=True skips zeroing.
+    """
     other_astro_ids = set()
     neuron_ids = set()
     valid_ids = set()
@@ -290,7 +297,9 @@ def clean_and_split_interaction_labels(run_dir: str, id_map: list, chunk_z: int 
 
 
 def save_progress(path: str, progress: dict):
-    """Atomic write (temp file + rename) so a crash mid-write can't leave a corrupt file."""
+    """
+    Atomic write (temp file + rename) so a crash mid-write can't leave a corrupt file.
+    """
     tmp_path = path + ".tmp"
     with open(tmp_path, "w") as f:
         json.dump(progress, f, default=_json_default)
@@ -330,10 +339,12 @@ def peek_tiff_shape(path: str):
 
 
 def merge_slabs_to_stack(a_slab_dir: str, out_path: str, slab_ranges, dtype, yx_shape) -> int:
-    """Concatenates per-slab TIFFs into one BigTIFF via a memmapped output
+    """
+    Concatenates per-slab TIFFs into one BigTIFF via a memmapped output
     array (repeated TiffWriter.write() calls don't merge 3D slabs reliably
     on read-back), madvise(DONTNEED) per slab to keep peak memory ~one slab.
-    Returns total Z slices written."""
+    Returns total Z slices written.
+    """
     slab_ranges = sorted(slab_ranges)
     total_z = sum(end - start for start, end in slab_ranges)
     final_shape = (total_z,) + tuple(yx_shape)
@@ -362,11 +373,13 @@ def merge_slabs_to_stack(a_slab_dir: str, out_path: str, slab_ranges, dtype, yx_
 
 
 def read_central_slices(path: str, chunk_z: int = 10):
-    """Central XY, XZ, and YZ slices of a saved TIFF stack via memmap, without
+    """
+    Central XY, XZ, and YZ slices of a saved TIFF stack via memmap, without
     loading the full volume: reads in Z-chunks (not a naive constant-X-and-Y
     column read, which would fault in nearly the whole file for a
     Z-contiguous array) and releases each chunk via madvise. Returns
-    (xy_slice, xz_slice, yz_slice)."""
+    (xy_slice, xz_slice, yz_slice).
+    """
     arr = tifffile.memmap(path)
     nz, ny, nx = arr.shape
     cz, cy, cx = nz // 2, ny // 2, nx // 2
@@ -415,7 +428,9 @@ def _save_preview_pair(out_path: str, img_slice: np.ndarray, mask_slice: np.ndar
 
 
 def save_previews(out_dir: str, image_zyx: np.ndarray, mask_zyx: np.ndarray):
-    """Lightweight central-slice QC previews (xy, xz, and yz) with mask outline; sanity check only."""
+    """
+    Lightweight central-slice QC previews (xy, xz, and yz) with mask outline; sanity check only.
+    """
     nz, ny, nx = image_zyx.shape
     cz, cy, cx = nz // 2, ny // 2, nx // 2
 
@@ -429,8 +444,10 @@ def save_previews(out_dir: str, image_zyx: np.ndarray, mask_zyx: np.ndarray):
 
 
 def save_previews_from_disk(out_dir: str, image_path: str, mask_path: str):
-    """Same as save_previews, for volumes too large for memory; reads only
-    the three central slices back via memmap."""
+    """
+    Same as save_previews, for volumes too large for memory; reads only
+    the three central slices back via memmap.
+    """
     img_xy, img_xz, img_yz = read_central_slices(image_path)
     mask_xy, mask_xz, mask_yz = read_central_slices(mask_path)
 
@@ -447,7 +464,9 @@ _TARGET_ASTROCYTE_COLOR = (1.0, 0.0, 0.0, 1.0)
 
 
 def save_astrocyte_legend(out_path: str):
-    """One-entry legend for the "astrocyte_overlays/" stack."""
+    """
+    One-entry legend for the "astrocyte_overlays/" stack.
+    """
     import matplotlib
 
     matplotlib.use("Agg")
@@ -467,10 +486,12 @@ def _overlay_progress_path(overlay_dir: str) -> str:
 
 
 def save_astrocyte_overlay_stack(out_dir: str, image_path: str, mask_path: str, downsample: int = 10, chunk_z: int = 10, resume: bool = True):
-    """One EM+mask overlay PNG per XY section under "astrocyte_overlays/",
+    """
+    One EM+mask overlay PNG per XY section under "astrocyte_overlays/",
     plus legend.png. resume=True checkpoints highest fully-written z to
     _overlay_progress.json; only that marker is trusted, not an existing
-    PNG's mere presence (could be a stale render)."""
+    PNG's mere presence (could be a stale render).
+    """
     import matplotlib
 
     matplotlib.use("Agg")
@@ -565,9 +586,11 @@ def _entry_category(entry: dict) -> str:
 
 
 def _build_category_color_lut(id_map: list, max_label: int) -> np.ndarray:
-    """RGBA lookup table for label ids 0..max_label (index 0 = background,
+    """
+    RGBA lookup table for label ids 0..max_label (index 0 = background,
     transparent). Shared by _label_overlay_rgba and save_label_legend so image
-    and legend always agree."""
+    and legend always agree.
+    """
     lut = np.zeros((max_label + 1, 4))
     for entry in id_map:
         lut[entry["local_id"]] = _CATEGORY_COLORS[_entry_category(entry)]
@@ -582,8 +605,10 @@ def _label_overlay_rgba(label_slice: np.ndarray, id_map: list, max_label: int):
 
 
 def save_label_legend(out_path: str, id_map: list, ncol: int = 1):
-    """Up-to-4-swatch legend (target astrocyte, other astrocytes, neuron, and
-    dendrite), each with its count."""
+    """
+    Up-to-4-swatch legend (target astrocyte, other astrocytes, neuron, and
+    dendrite), each with its count.
+    """
     import matplotlib
     from collections import Counter
 
@@ -607,10 +632,12 @@ def save_label_legend(out_path: str, id_map: list, ncol: int = 1):
 
 
 def _save_astrocyte_neuron_overlay_single(out_path: str, img_slice: np.ndarray, label_slice: np.ndarray, id_map: list, max_label: int):
-    """Single-panel EM+label composite. figsize matches the array's exact
+    """
+    Single-panel EM+label composite. figsize matches the array's exact
     pixel dims so one array pixel = one output pixel (no antialiased
     blending of the label color). vmin and vmax pinned to 0-255, not
-    matplotlib's per-slice auto-stretch, so brightness stays consistent."""
+    matplotlib's per-slice auto-stretch, so brightness stays consistent.
+    """
     import matplotlib
 
     matplotlib.use("Agg")
@@ -628,8 +655,10 @@ def _save_astrocyte_neuron_overlay_single(out_path: str, img_slice: np.ndarray, 
 
 
 def _save_mask_overlay_single(out_path: str, img_slice: np.ndarray, mask_slice: np.ndarray):
-    """Single-panel EM+astrocyte-mask composite; see
-    _save_astrocyte_neuron_overlay_single for the figsize, vmin, and vmax reasoning."""
+    """
+    Single-panel EM+astrocyte-mask composite; see
+    _save_astrocyte_neuron_overlay_single for the figsize, vmin, and vmax reasoning.
+    """
     import matplotlib
 
     matplotlib.use("Agg")
@@ -650,11 +679,13 @@ def _save_mask_overlay_single(out_path: str, img_slice: np.ndarray, mask_slice: 
 
 
 def save_astrocyte_neuron_overlay_stack(out_dir: str, image_path: str, label_path: str, max_label: int, downsample: int = 10, chunk_z: int = 10, resume: bool = True):
-    """One EM+label overlay PNG per XY section under
+    """
+    One EM+label overlay PNG per XY section under
     "astrocyte_neuron_overlays/" (fixed color LUT, one shared legend.png).
     Uses both madvise and posix_fadvise per chunk: madvise alone was
     insufficient against some hosts' low-memory guard. resume=True: same
-    checkpointing as save_astrocyte_overlay_stack."""
+    checkpointing as save_astrocyte_overlay_stack.
+    """
     import matplotlib
 
     matplotlib.use("Agg")
@@ -731,11 +762,13 @@ _CONTACT_ALPHA = 0.55
 
 
 def save_contact_filtered_overlay_stack(out_dir: str, image_path: str, mask_path: str, label_path: str, downsample: int = 10, chunk_z: int = 10, threshold_nm: float = 40.0, native_xy_resolution_nm: float = 8.0, resume: bool = True):
-    """QC-only overlay: 2D XY distance transform on the DOWNSAMPLED mask
+    """
+    QC-only overlay: 2D XY distance transform on the DOWNSAMPLED mask
     (not contact_filter.py's real 3D native-resolution check); fine for
     eyeballing, not a source of truth. Target=gold; dendrite pixels within
     threshold_nm of the mask=green; else plain EM (raw uint8 RGB via PIL).
-    resume=True: same checkpointing as the other overlay-stack functions."""
+    resume=True: same checkpointing as the other overlay-stack functions.
+    """
     from PIL import Image
     from scipy.ndimage import distance_transform_edt
 
@@ -832,10 +865,12 @@ SYNAPSE_TAG_DEFAULT_COLOR = "#999999"
 
 
 def save_synapse_marker_overlay(out_dir: str, image_path: str, synapses: list, downsample: int = 10, chunk_z: int = 10, z_tolerance: int = 2):
-    """One EM+synapse scatter-dot overlay PNG per XY section under
+    """
+    One EM+synapse scatter-dot overlay PNG per XY section under
     "synapse_overlays/" (+ legend.png); synapses are points, not regions.
     `synapses`: dicts with local ZYX voxel coords + compartment_tag. Each
-    is drawn on every Z section within z_tolerance of its own z."""
+    is drawn on every Z section within z_tolerance of its own z.
+    """
     import matplotlib
 
     matplotlib.use("Agg")
