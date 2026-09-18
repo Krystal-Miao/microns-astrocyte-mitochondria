@@ -1,0 +1,11 @@
+caveclient>=8.0
+cloud-volume>=12.0
+numpy
+scipy
+pandas
+tifffile
+pyyaml
+tqdm
+matplotlib
+scikit-image
+pytest

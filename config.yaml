@@ -1,0 +1,84 @@
+# MICrONS astrocyte extraction + interaction-analysis pipeline configuration.
+
+# Keys output as "astro_<root_id>/runs/<pipeline_date>/". null = auto-derive
+# today's date; pin a string to force a multi-day run into one dir.
+pipeline_date: null
+
+dataset: minnie65_public
+
+# Pin to a static segmentation snapshot, not live graphene, to keep
+# root_ids stable; check available snapshots first.
+materialization_version: 1300
+
+proofreading_table: vortex_astrocyte_proofreading_status
+proofreading_status_value: clean
+
+em:
+  source: "precomputed://https://bossdb-open-data.s3.amazonaws.com/iarpa_microns/minnie/minnie65/em"
+  mip: 0
+
+segmentation:
+  source: "precomputed://https://storage.googleapis.com/iarpa_microns/minnie/minnie65/seg_m1300"
+  mip: 0
+
+extraction:
+  # full_bbox errors if too big; chunked streams in Z-slabs (default --
+  # full_bbox refuses immediately on this dataset's astrocytes).
+  mode: chunked
+
+  chunk_z_voxels: 64
+
+  # Keep per-slab TIFFs under "_slabs/" after merge instead of deleting them.
+  keep_slabs: true
+
+  margin_um:
+    x: 5.0
+    y: 5.0
+    z: 5.0
+
+  # Safety limits, checked BEFORE any download is attempted.
+  max_memory_gb: 8
+  max_voxels: 1000000000
+
+output:
+  # `directory` is now a required CLI --data-dir argument, not here (see README).
+  axis_order: ZYX
+  save_previews: true
+
+  overlay_downsample: 10
+
+  # Overlay A: target astrocyte (single instance, binary) + EM.
+  save_astrocyte_overlay_stack: true
+  # Overlay B: multi-instance EM+label overlay, scoped to interaction_categories below.
+  save_astrocyte_neuron_overlay_stack: true
+  # Synapse data is always in interaction_analysis.json; this only toggles the PNG overlay.
+  save_synapse_overlay_stack: false
+  synapse_overlay_z_tolerance: 2
+
+# Categories unioned into interacting_root_ids. Loose = any classifier hit;
+# strict (proofread) also requires the relevant proofreading table match.
+interaction_categories:
+  astrocyte: true
+  neuron: true
+
+# Strict (proofread) view for "neuron", mirroring proofreading_table above for astrocyte.
+neuron_proofreading:
+  table: proofreading_status_and_strategy
+  # Require BOTH axon+dendrite proofread status for strict view (fewer false positives).
+  require_axon: true
+
+# Sizing for the neuron bbox-segmentation enumeration pass (only used when
+# interaction_categories.neuron is true).
+bbox_enumeration:
+  # Drop root_ids with fewer voxels than this before classifying: filters
+  # out segmentation noise unlikely to have a detected nucleus anyway.
+  min_voxels: 50000
+
+# Extra root_ids extracted in addition to --root-id or query results.
+manual_root_ids: []
+
+# See README's Contact threshold section.
+contact_filter:
+  threshold_nm: 40.0
+  # Optional cap on XY tile size (see contact_filter.py); leave unset to auto-size from max_memory_gb.
+  max_tile_xy_voxels: null
