@@ -1,5 +1,13 @@
 # MICrONS Astrocyte Toolkit (v1300)
 
+This research workspace is based on the
+[QuIN-Lab astrocyte toolkit](https://github.com/QuIN-Lab/microns-astrocyte-toolkit).
+Local additions support small-volume extraction, offline visualization, and an
+exploratory preprocessing pilot for future astrocyte mitochondria segmentation.
+See [the pilot notes](docs/preprocessing_pilot.md) for methods and limitations.
+The original toolkit and its Git history are retained; these additions do not
+establish a validated mitochondria segmentation pipeline.
+
 Extracts 3D EM subvolumes and binary astrocyte masks, and finds real cells
 and synapse-compartment interactions near them, for proofread astrocytes in the
 [MICrONS](https://www.microns-explorer.org/) `minnie65_public` dataset.
@@ -119,3 +127,54 @@ python scripts/build_full_mask_overlays.py --data-dir /path/to/output/astro_8646
 python scripts/threshold_sensitivity.py --data-dir /path/to/output/astro_864691136057675736
 ```
 
+### Small native-resolution samples (Mac-friendly)
+
+To explore EM preprocessing without downloading a whole astrocyte crop:
+
+```bash
+python -B scripts/download_astrocyte_samples.py --output-dir samples/astro_864691136057675736_run1
+```
+
+Uses the existing environment and CAVE credentials. Defaults to three nonoverlapping
+512 x 512 x 128 XYZ crops at mip 0, selected around seeded mesh vertices and checked
+for at least 1% target-cell occupancy in segmentation. At most 12 candidate volumes
+are checked. The saved EM and masks total approximately 192 MiB for three samples;
+network transfers and transient memory are larger (including segmentation and mesh).
+Missing chunks raise errors instead of being filled with zeroes.
+
+Each sample contains original `image.tif`, binary `mask.tif` (both ZYX),
+`metadata.json` with world coordinates and provenance, and `preview.png` showing
+the XY slice with the most target voxels, raw and with a red mask overlay.
+`manifest.json` records candidate occupancies and completed samples. This does not
+identify mitochondria or provide representative whole-cell sampling. These samples
+are separate from the main pipeline's `astro_<id>/runs/` structure.
+
+The script avoids the main overlay code's platform-specific cache calls. Existing
+output directories are refused; interrupted runs retain any completed samples and
+require a new output directory for another run. Local `samples/` data are Git-ignored.
+
+To browse the downloaded slices offline in a browser (no extra packages or server):
+
+```bash
+python -B scripts/build_sample_viewer.py --data-dir samples/astro_864691136057675736_run1 --output-dir samples/astro_864691136057675736_run1/viewer
+```
+
+Open the generated `viewer/index.html` in a browser. Keep its sibling sample
+asset folders alongside it. Switch samples and Z slices, toggle the red astrocyte
+mask, adjust display contrast/opacity, or click to record local XYZ coordinates.
+Display adjustments never modify the source TIFFs. The viewer stores lossless
+per-slice PNG copies and adds disk usage; an existing output directory is refused.
+
+### Preprocessing pilot
+
+See [the preprocessing pilot notes](docs/preprocessing_pilot.md) for ROI extraction
+and comparison commands, parameters, provenance checks, and known limitations.
+`scripts/prepare_preprocessing_roi.py` creates an unchanged reference crop;
+`scripts/compare_preprocessing.py` compares raw EM, a linear display control,
+CLAHE, and two exploratory NLM strengths. Generated data and offline reports stay
+under the Git-ignored `samples/` directory.
+
+This pilot concerns astrocyte EM preprocessing, not neuron/contact analysis or
+validated mitochondria segmentation. The astrocyte mask is not mitochondria ground
+truth. The notes flag sample_02 Z=108 as an abnormal zero-valued slice excluded
+from comparison statistics; no repair is applied.
