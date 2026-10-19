@@ -131,3 +131,51 @@ sample_02 常量层以外的平均绝对变化（0–255 单位）：CLAHE 30.03
 沿用 sample_02 的全部处理参数和线性窗口选择规则。检查的 11 个 ROI 切片未发现恒定灰度层，不代表排除了所有图像异常。原始及 ROI 来源哈希保持不变，处理 TIFF 读回一致，残差恒等式和参数一致性核验通过。
 
 本区域平均绝对变化（0–255 单位）：CLAHE 26.636、NLM h=2/255 为 0.883、NLM h=3/255 为 1.558；这些仍然不是质量分数。三块数据均来自同一个 astrocyte，不构成跨细胞验证。sample_03 的人工比较反馈尚待记录，没有确定最佳方法或线粒体身份。
+
+## Phase 2：评价区域候选（待确认）
+
+新脚本 `scripts/build_evaluation_candidates.py` 从原始 ROI 构建离线审阅页，不执行降噪。
+当前入口：`samples/astro_864691136057675736_run1/preprocessing/evaluation_candidates_02/index.html`。
+`evaluation_candidates_01/` 为选点调整前的初稿，请使用 02。
+
+每个 sample 提供边界、内部纹理和相对均匀候选，共 9 个；所有状态为 pending。
+边界/纹理位置是原图视觉提议，不是经确认的线粒体。均匀候选为中心层目标 mask
+占比至少 99% 的 32×32 窗口中，以 4 像素步长搜索最低灰度标准差的区域；
+这个选择会偏向低变化区域，不能把其标准差当作无偏噪声估计，也可能选中细胞器内部。
+候选可能在同一 sample 内重叠，不作为独立重复。sample_01 计划调参，02/03 预留评价，均待确认。
+
+每项显示中心层及前后各一层、黄色候选框、边界项的拟议青色剖面线，可切换红色 astrocyte mask。
+源 sample Z 分别为 46–48、104–106、17–19；不含异常 Z=108。
+每个 ROI 的显示窗口由非恒定层的原始强度 1%–99% 分位数固定确定；只改变预览。
+审阅选项为待确认/保留/排除/调整，备注和选项需点击导出 JSON 保存，不会自动持久化。
+
+`candidates.json` 记录 source-local 坐标、全局 nm 中心坐标、框范围、mask 占比、显示窗口和来源哈希。
+生成过程核验 9 个来源文件哈希不变、候选范围有效、切片非恒定，生成 54 张预览。
+尚未运行新方法或取得任何评价结果；浏览器交互仍需人工确认。
+
+## Phase 2：sample_01 固定区域降噪试验（2026-10-18）
+
+后续人工反馈：Z47 边界 h2 比 h3 清楚、c4 比 c2 清楚、h2 与 c4 接近；内部纹理 c2 比 h2 多；uniform 中 h2 更均匀但差距不大，最初综合偏好 c2。Z48 认为 h2 平滑更明显，h2/c2 残差差别不大；Z46 也差不多。保留 h2/c2 两个候选，未确定最佳方法。
+
+已固定全部参数运行 sample_02 Z104–106 和 sample_03 Z17–19 的 Raw/h2/c2 三列比较。入口为同一 preprocessing 目录下 evaluation_sample02_01/index.html 和 evaluation_sample03_01/index.html。sample_02 Z108 排除。脚本支持 --sample 参数及水平/垂直剖面。每个目录含输出 TIFF、残差、剖面、diagnostics.csv、profiles.csv、report.json。输入哈希与 TIFF 读回验证通过。
+
+中心层 uniform 标准差（0–255）：sample02 Z105 为 Raw 4.436、h2 3.713、c2 3.974；sample03 Z18 为 Raw 4.164、h2 3.342、c2 3.537。仅表示局部波动，不是噪声估计或质量排名。显示窗口与残差色标在每个样本内部固定，跨样本可能不同。两块区域此前已被视觉探索，且来自同一细胞，因此是固定参数的区域复核，不是盲测或独立生物学验证。新结果人工审阅待进行，结构身份及剖面适用性仍未确认。
+
+在用户同意开始后，将 sample_01 的三个候选位置固定用于探索性调参；这不代表已确认细胞器身份。原候选 manifest 保留 pending 历史状态，本次选择与授权记录在运行的 report.json。sample_02/03 未参与本次调参，之后只能作为同一细胞内的预留区域检查，不能称为独立生物学验证。
+
+脚本：`scripts/run_denoising_tuning.py`。
+结果入口：`samples/astro_864691136057675736_run1/preprocessing/tuning_sample01_01/index.html`。
+
+固定 Z=46、47、48，在完整 512×512 原始切片上分别处理后裁出 ROI，不先将 mask 外清零。输入为 float32 /255，五组为 Raw、NLM h=2/255、NLM h=3/255、Bilateral sigma_color=2/255、Bilateral sigma_color=4/255。NLM 使用 patch_size=5、patch_distance=6、fast_mode=True、sigma=0；Bilateral 使用 sigma_spatial=1 px、win_size=7、bins=10000、reflect 边界。两类算法的参数不是等效强度，当前不是最优参数搜索。
+
+所有方法与切片共用原始强度 112–160 的显示窗口；本轮不加 CLAHE。输出包含五组 TIFF、四组有符号残差 TIFF、三个区域的局部比较图、共同色标残差图、边界灰度剖面、diagnostics.csv、profiles.csv 和包含参数及来源哈希的 report.json。
+
+中心层 Z=47 的相对均匀区域灰度标准差（0–255 单位）：Raw 3.335、NLM h2 2.313、NLM h3 1.798、Bilateral c2 2.667、Bilateral c4 2.336。这只表示局部灰度波动下降，不是噪声标准差或 SNR，不用于直接排名。该区域按低标准差筛选，存在选择偏差。尚无干净参考图或已确认线粒体标签，不能证明真实细节全部保留，也未选择最佳方法。
+
+验证：来源与 ROI 文件哈希未改变；输出 TIFF 读回一致；形状、有限数值和范围检查通过；页面图片链接存在，45 行诊断记录已核验。浏览器人工评价待进行。代码与文档尚未提交或推送，结果图保存在本机。
+
+复现命令（输出目录必须不存在）：
+
+```bash
+MPLCONFIGDIR=/tmp/microns-mpl /opt/miniconda3/envs/microns-astrocyte-toolkit/bin/python -B scripts/run_denoising_tuning.py --manifest samples/astro_864691136057675736_run1/preprocessing/evaluation_candidates_02/candidates.json --output-dir samples/astro_864691136057675736_run1/preprocessing/tuning_sample01_01
+```
