@@ -10,8 +10,36 @@ import torch
 import tifffile
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'scripts'))
 from train_astro_unet import UNet, loss_fn, metrics, make_split, batch, evaluate, main
+from train_foreground_aware_pilot import ranking_metrics
+from train_partial_astrocyte_labels import partial_objective
+from train_partial_astrocyte_3d import UNet3D
 
 class BaselineTests(unittest.TestCase):
+    def test_ranking_metrics_known_values(self):
+        score = ranking_metrics(np.array([0.9, 0.8, 0.2, 0.1]),
+                                np.array([1, 0, 1, 0]))
+        self.assertAlmostEqual(score['average_precision'], (1 + 2 / 3) / 2)
+        self.assertAlmostEqual(score['best_threshold_dice'], 0.8)
+        self.assertAlmostEqual(score['best_threshold'], 0.2)
+
+    def test_partial_objective_ignores_unknown_pixels(self):
+        logits = torch.tensor([[[[0.2, -4.0]]]])
+        valid = torch.tensor([[[[True, False]]]])
+        first = partial_objective(logits, torch.tensor([[[[1.0, 0.0]]]]), valid)
+        second = partial_objective(logits, torch.tensor([[[[1.0, 1.0]]]]), valid)
+        self.assertAlmostEqual(float(first), float(second))
+
+    def test_3d_model_shape_and_partial_backward(self):
+        model = UNet3D(width=2)
+        x = torch.rand(1, 1, 8, 16, 16)
+        y = torch.randint(0, 2, x.shape).float()
+        valid = torch.rand(x.shape) > 0.3
+        output = model(x)
+        self.assertEqual(output.shape, x.shape)
+        loss = partial_objective(output, y, valid)
+        loss.backward()
+        self.assertTrue(torch.isfinite(loss))
+
     def test_metrics_known_overlap(self):
         score=metrics(3,1,2)
         self.assertAlmostEqual(score['dice'],2/3)

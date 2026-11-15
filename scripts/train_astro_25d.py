@@ -19,7 +19,7 @@ from torch.nn import functional as F
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from diagnose_astro_unet import save_overlay  # noqa: E402
 from train_astro_unet import block, digest, loss_fn, metrics  # noqa: E402
-from train_foreground_aware_pilot import make_sampler  # noqa: E402
+from train_foreground_aware_pilot import make_sampler, ranking_metrics  # noqa: E402
 
 
 class UNet25D(nn.Module):
@@ -96,10 +96,15 @@ def validate(model, image, mask, centers):
     pooled = Counter(tp=0, fp=0, fn=0)
     results = []
     probabilities = {}
+    pooled_probabilities = []
+    pooled_truth = []
+    radius = model.input_slices // 2
     for z in centers:
-        probability = predict_tiled(model, np.asarray(image[z - 2:z + 3]))
+        probability = predict_tiled(model, np.asarray(image[z - radius:z + radius + 1]))
         score = measure(probability, np.asarray(mask[z]))
         probabilities[z] = probability
+        pooled_probabilities.append(probability.reshape(-1))
+        pooled_truth.append(np.asarray(mask[z]).astype(bool).reshape(-1))
         for key in ("tp", "fp", "fn"):
             pooled[key] += score[key]
         results.append(score)
@@ -108,6 +113,8 @@ def validate(model, image, mask, centers):
                 "foreground_probability_mean", "background_probability_mean"):
         combined[key] = float(np.mean([row[key] for row in results]))
     combined["evaluated_slices"] = len(centers)
+    combined.update(ranking_metrics(np.concatenate(pooled_probabilities),
+                                    np.concatenate(pooled_truth)))
     return combined, probabilities
 
 
@@ -117,6 +124,8 @@ def main():
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--steps", type=int, default=500)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--input-slices", type=int, choices=[3, 5], default=3)
+    parser.add_argument("--validation-z", type=int, nargs="+", default=[112, 117, 122, 127])
     parser.add_argument("--smoke", action="store_true", help="Repeatedly train on one Z=47 patch")
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=False)
@@ -125,21 +134,26 @@ def main():
     rng = np.random.default_rng(args.seed)
     image = tifffile.memmap(args.data / "image.tif", mode="r")
     mask = tifffile.memmap(args.data / "mask.tif", mode="r")
-    if image.shape != (128, 512, 512) or mask.shape != image.shape:
-        raise ValueError("Expected aligned 128x512x512 image and mask")
+    if image.ndim != 3 or image.shape[0] != 128 or min(image.shape[1:]) < 256 or mask.shape != image.shape:
+        raise ValueError("Expected aligned 128xHxW image and mask with H,W >= 256")
     hashes = {name: digest(args.data / name) for name in ("image.tif", "mask.tif", "metadata.json")}
-    train_z = [z for z in range(2, 94) if np.ptp(image[z]) > 0]
-    validation_z = [112, 117, 122, 125]
+    radius = args.input_slices // 2
+    valid_z = [z for z in range(radius, image.shape[0] - radius)
+               if all(np.ptp(image[n]) > 0 for n in range(z - radius, z + radius + 1))]
+    train_z = [z for z in valid_z if z < 96]
+    validation_z = args.validation_z
+    if not all(z in valid_z for z in validation_z):
+        raise ValueError("A validation center or one of its neighboring input slices is invalid")
     sampler = make_sampler(mask, train_z, 256)
-    model = UNet25D(16, 5)
+    model = UNet25D(16, args.input_slices)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.0003)
     config = {
         "status": "2.5D development diagnostic", "smoke": args.smoke,
-        "input": "five adjacent uint8/255 EM slices as channels", "target": "center-slice mask",
+        "input": f"{args.input_slices} adjacent uint8/255 EM slices as channels", "target": "center-slice mask",
         "steps": args.steps, "seed": args.seed, "width": 16, "batch_size": 1 if args.smoke else 2,
         "patch_yx": [256, 256], "learning_rate": 0.0003, "augmentation": False,
         "loss": "BCEWithLogits + soft Dice", "threshold": 0.5,
-        "train_center_z": train_z, "validation_center_z": validation_z,
+        "input_slices": args.input_slices, "train_center_z": train_z, "validation_center_z": validation_z,
         "source_sha256": hashes, "script_sha256": digest(Path(__file__)),
         "scope": "sample_01 development only; no test or biological generalization",
     }
@@ -159,7 +173,7 @@ def main():
                 draws.append((z, y, x, category, anchor))
         x_batch, y_batch = [], []
         for batch_index, (z, y, x, category, anchor) in enumerate(draws):
-            x_batch.append(np.asarray(image[z - 2:z + 3, y:y + 256, x:x + 256]).copy())
+            x_batch.append(np.asarray(image[z - radius:z + radius + 1, y:y + 256, x:x + 256]).copy())
             center_mask = np.asarray(mask[z, y:y + 256, x:x + 256]).copy()
             y_batch.append(center_mask)
             trace.append({"step": step, "batch_index": batch_index, "category": category,
@@ -197,7 +211,7 @@ def main():
             if key > best_key:
                 best_key = key
                 torch.save({"model": model.state_dict(), "optimizer": optimizer.state_dict(),
-                            "width": 16, "input_slices": 5, "step": step,
+                            "width": 16, "input_slices": args.input_slices, "step": step,
                             "validation": validation}, args.out / "best.pt")
             snapshot = args.out / f"step_{step:04d}"
             snapshot.mkdir()
@@ -212,7 +226,7 @@ def main():
                   f"elapsed={row['elapsed_seconds']:.0f}s", flush=True)
 
     torch.save({"model": model.state_dict(), "optimizer": optimizer.state_dict(),
-                "width": 16, "input_slices": 5, "step": args.steps,
+                "width": 16, "input_slices": args.input_slices, "step": args.steps,
                 "validation": validation}, args.out / "last.pt")
     (args.out / "history.json").write_text(json.dumps(history, indent=2))
     with (args.out / "metrics.csv").open("w", newline="") as handle:

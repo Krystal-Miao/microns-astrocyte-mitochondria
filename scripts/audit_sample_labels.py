@@ -125,7 +125,8 @@ def write_csv(path: Path, rows: list[dict]) -> None:
         writer.writerows(rows)
 
 
-def build_sample(client, sample_dir: Path, output_dir: Path, min_voxels: int, slab_z: int) -> dict:
+def build_sample(client, sample_dir: Path, output_dir: Path, min_voxels: int, slab_z: int,
+                 save_assets: bool = True) -> dict:
     metadata_path = sample_dir / "metadata.json"
     metadata = json.loads(metadata_path.read_text())
     image, source_mask = validate_source(sample_dir, metadata)
@@ -179,12 +180,14 @@ def build_sample(client, sample_dir: Path, output_dir: Path, min_voxels: int, sl
         labels_path = output_dir / "audit_labels.tif"
         labels = tifffile.memmap(labels_path, shape=image.shape, dtype=np.uint8, bigtiff=True)
         assets = output_dir / "assets"
-        assets.mkdir()
+        if save_assets:
+            assets.mkdir()
         for z in range(image.shape[0]):
             labels[z] = label_plane(np.asarray(segmentation[z]), code_by_root)
-            Image.fromarray(overlay(np.asarray(image[z]), labels[z])).save(
-                assets / f"overlay_{z:03d}.png", optimize=False
-            )
+            if save_assets:
+                Image.fromarray(overlay(np.asarray(image[z]), labels[z])).save(
+                    assets / f"overlay_{z:03d}.png", optimize=False
+                )
         labels.flush()
 
     label_voxels = Counter()
@@ -280,6 +283,8 @@ def main() -> None:
     parser.add_argument("--config", default="config.yaml")
     parser.add_argument("--min-voxels", type=int, default=50)
     parser.add_argument("--slab-z", type=int, default=16)
+    parser.add_argument("--mip", type=int, default=0)
+    parser.add_argument("--skip-assets", action="store_true")
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
     if args.self_test:
@@ -290,11 +295,15 @@ def main() -> None:
     sample_dirs = sorted(path.parent for path in args.data_dir.glob("sample_*/metadata.json"))
     if not sample_dirs:
         raise ValueError(f"No sample metadata found under {args.data_dir}")
-    client = MicronsClient(load_config(args.config))
+    config = load_config(args.config)
+    config["em"]["mip"] = args.mip
+    config["segmentation"]["mip"] = args.mip
+    client = MicronsClient(config)
     args.output_dir.mkdir(parents=True)
     try:
         summaries = [
-            build_sample(client, sample, args.output_dir / sample.name, args.min_voxels, args.slab_z)
+            build_sample(client, sample, args.output_dir / sample.name, args.min_voxels, args.slab_z,
+                         save_assets=not args.skip_assets)
             for sample in sample_dirs
         ]
         (args.output_dir / "summary.json").write_text(json.dumps({
@@ -302,11 +311,12 @@ def main() -> None:
             "samples": summaries,
             "label_codes": {str(code): {"name": name, "rgb": color} for code, (name, color) in LABELS.items()},
         }, indent=2))
-        build_viewer(args.output_dir, summaries)
+        if not args.skip_assets:
+            build_viewer(args.output_dir, summaries)
     except Exception:
         shutil.rmtree(args.output_dir)
         raise
-    print(f"Open: {args.output_dir / 'index.html'}", flush=True)
+    print(f"Saved audit: {args.output_dir}", flush=True)
 
 
 if __name__ == "__main__":

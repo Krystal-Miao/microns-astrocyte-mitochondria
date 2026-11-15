@@ -96,6 +96,27 @@ def batch_metrics(logits, target):
     return result
 
 
+def ranking_metrics(probability, truth):
+    """Pixel-wise average precision and maximum Dice over score thresholds."""
+    probability = np.asarray(probability).reshape(-1)
+    truth = np.asarray(truth, dtype=bool).reshape(-1)
+    positives = int(truth.sum())
+    if positives == 0:
+        return {"average_precision": None, "best_threshold_dice": None,
+                "best_threshold": None}
+    order = np.argsort(-probability, kind="stable")
+    ranked_truth = truth[order]
+    tp = np.cumsum(ranked_truth, dtype=np.int64)
+    fp = np.cumsum(~ranked_truth, dtype=np.int64)
+    precision = tp / (tp + fp)
+    average_precision = float(precision[ranked_truth].sum() / positives)
+    dice = 2 * tp / (positives + tp + fp)
+    best = int(np.argmax(dice))
+    return {"average_precision": average_precision,
+            "best_threshold_dice": float(dice[best]),
+            "best_threshold": float(probability[order[best]])}
+
+
 @torch.no_grad()
 def validate(model, image, mask, validation_z, pos_weight):
     model.eval()
@@ -104,10 +125,14 @@ def validate(model, image, mask, validation_z, pos_weight):
     foreground_probabilities = []
     background_probabilities = []
     probabilities = {}
+    pooled_probabilities = []
+    pooled_truth = []
     for z in validation_z:
         probability = predict_tiled(model, np.asarray(image[z]), size=256, stride=128)
         probabilities[z] = probability
         truth = np.asarray(mask[z]).astype(bool)
+        pooled_probabilities.append(probability.reshape(-1))
+        pooled_truth.append(truth.reshape(-1))
         prediction = probability >= 0.5
         tp += int(np.count_nonzero(prediction & truth))
         fp += int(np.count_nonzero(prediction & ~truth))
@@ -129,6 +154,8 @@ def validate(model, image, mask, validation_z, pos_weight):
         background_probability_mean=float(np.concatenate(background_probabilities).mean()),
         evaluated_slices=len(validation_z),
     )
+    result.update(ranking_metrics(np.concatenate(pooled_probabilities),
+                                  np.concatenate(pooled_truth)))
     return result, probabilities
 
 
@@ -140,6 +167,7 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", choices=["cpu", "mps", "cuda"], default="cpu")
     parser.add_argument("--pos-weight", type=float, default=1.0)
+    parser.add_argument("--validation-z", type=int, nargs="+", default=[112, 117, 122, 127])
     args = parser.parse_args()
     if args.steps < 1 or not np.isfinite(args.pos_weight) or args.pos_weight <= 0:
         parser.error("steps and pos-weight must be positive and finite")
@@ -151,11 +179,11 @@ def main():
     source_hashes = {name: digest(args.data / name) for name in ("image.tif", "mask.tif", "metadata.json")}
     image = tifffile.memmap(args.data / "image.tif", mode="r")
     mask = tifffile.memmap(args.data / "mask.tif", mode="r")
-    if image.shape != (128, 512, 512) or mask.shape != image.shape:
-        raise ValueError("Expected aligned 128x512x512 image and mask")
+    if image.ndim != 3 or image.shape[0] != 128 or min(image.shape[1:]) < 256 or mask.shape != image.shape:
+        raise ValueError("Expected aligned 128xHxW image and mask with H,W >= 256")
     valid_z = np.flatnonzero(np.ptp(image, axis=(1, 2)) > 0).tolist()
     train_z = [z for z in valid_z if z < 96]
-    validation_z = [112, 117, 122, 127]
+    validation_z = args.validation_z
     if not all(z in valid_z for z in validation_z):
         raise ValueError("A fixed validation slice is constant or absent")
     draw = make_sampler(mask, train_z, 256)

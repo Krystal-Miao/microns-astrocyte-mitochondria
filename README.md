@@ -5,6 +5,9 @@ This research workspace is based on the
 Local additions support small-volume extraction, offline visualization, and an
 exploratory preprocessing pilot for future astrocyte mitochondria segmentation.
 See [the pilot notes](docs/preprocessing_pilot.md) for methods and limitations.
+An exploratory partial-label 3D segmentation baseline, including whole-section
+visual results and its limitations, is documented in
+[the 3D baseline report](docs/astrocyte_3d_baseline.md).
 The original toolkit and its Git history are retained; these additions do not
 establish a validated mitochondria segmentation pipeline.
 
