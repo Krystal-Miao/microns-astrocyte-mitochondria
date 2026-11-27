@@ -47,14 +47,19 @@ def feather(size: int) -> np.ndarray:
 
 
 @torch.no_grad()
-def stitch_section(model, image, z, patch, stride_xy, stats, device):
+def stitch_section(model, image, z, patch, stride_xy, stats, device, blend="hann"):
     model.eval()
     pz, py, px = patch
     z0 = min(max(int(z) - pz // 2, 0), image.shape[0] - pz)
     local_z = int(z) - z0
     ys = starts(image.shape[1], py, stride_xy)
     xs = starts(image.shape[2], px, stride_xy)
-    weight2d = feather(py)[:, None] * feather(px)[None, :]
+    if blend == "hann":
+        weight2d = feather(py)[:, None] * feather(px)[None, :]
+    elif blend == "uniform":
+        weight2d = 1.0
+    else:
+        raise ValueError(f"Unknown blending method: {blend}")
     total = np.zeros(image.shape[1:], dtype=np.float32)
     weights = np.zeros_like(total)
     for y0 in ys:
@@ -133,7 +138,7 @@ def label_panel(array, title, subtitle=""):
     return canvas
 
 
-def save_composite(path, raw, audit, probability, threshold, stats, grid):
+def save_composite(path, raw, audit, probability, threshold, stats, grid, tile_yx=(128, 128)):
     target, valid = arrays_from_labels(audit)
     truth = target.astype(bool)
     prediction = probability >= threshold
@@ -141,18 +146,23 @@ def save_composite(path, raw, audit, probability, threshold, stats, grid):
     reference = overlay(base, truth, COLORS["reference"])
     predicted = overlay(base, prediction, COLORS["prediction"])
     errors = error_overlay(base, prediction, truth, valid)
-    tiled = Image.fromarray(predicted)
-    draw = ImageDraw.Draw(tiled)
-    for x in grid["x_starts"][1:]:
-        draw.line((x, 0, x, tiled.height - 1), fill=(255, 220, 55), width=1)
-    for y in grid["y_starts"][1:]:
-        draw.line((0, y, tiled.width - 1, y), fill=(255, 220, 55), width=1)
+    tiled = Image.fromarray(predicted).convert("RGBA")
+    guides = Image.new("RGBA", tiled.size)
+    draw = ImageDraw.Draw(guides)
+    color = (255, 224, 112, 155)
+    for x in sorted({edge for start in grid["x_starts"] for edge in (start, start + tile_yx[1])}):
+        if 0 < x < tiled.width:
+            draw.line((x, 0, x, tiled.height - 1), fill=color)
+    for y in sorted({edge for start in grid["y_starts"] for edge in (start, start + tile_yx[0])}):
+        if 0 < y < tiled.height:
+            draw.line((0, y, tiled.width - 1, y), fill=color)
+    tiled = Image.alpha_composite(tiled, guides).convert("RGB")
     panels = [
         label_panel(base, "Raw EM"),
         label_panel(reference, "Reference", "red = labeled astrocyte"),
         label_panel(predicted, "Prediction", "cyan = probability >= locked threshold"),
         label_panel(errors, "Errors", "green TP | red FP | blue FN"),
-        label_panel(np.asarray(tiled), "Tile inspection", "yellow = overlapping tile starts"),
+        label_panel(np.asarray(tiled), "Sliding-window reference", "gold = tile starts and ends"),
     ]
     canvas = Image.new("RGB", (sum(p.width for p in panels), max(p.height for p in panels)), (24, 35, 43))
     x = 0
@@ -201,6 +211,7 @@ def save_curves(history_path, output_path):
     image.save(output_path, optimize=True)
 
 
+@torch.no_grad()
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run", type=Path, required=True)
@@ -208,6 +219,12 @@ def main():
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--sections", type=int, nargs="+", default=[32, 64, 96])
     parser.add_argument("--stride-xy", type=int, default=96)
+    parser.add_argument("--blend", choices=["hann", "uniform"], default="hann")
+    parser.add_argument("--split", choices=["validation", "test"], default="test")
+    parser.add_argument("--full-xy", action="store_true")
+    parser.add_argument("--threshold-from", type=Path, help="Validation Hann PR summary JSON")
+    parser.add_argument("--save-pr-scores", action="store_true",
+                        help="Save scored probabilities and labels for precision–recall analysis")
     parser.add_argument("--device", choices=["cpu", "mps"], default="cpu")
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=False)
@@ -217,13 +234,20 @@ def main():
 
     config = json.loads((args.run / "config.json").read_text())
     checkpoint = torch.load(args.run / "best.pt", map_location="cpu", weights_only=True)
-    names = config["untouched_test_samples"]
+    split_key = "validation_samples" if args.split == "validation" else "untouched_test_samples"
+    names = config[split_key]
     patch = tuple(config["patch_zyx"])
     threshold = float(checkpoint["validation"]["best_threshold"])
-    data = load(args.roots, names)
+    raw_data = load(args.roots, names)
+    from train_multicell3d_controlled_random import preprocess_images
+    variant = config.get("preprocessing_variant", "raw")
+    if args.threshold_from:
+        threshold = float(json.loads(args.threshold_from.read_text())[variant]["threshold_at_60_recall"])
+    data = preprocess_images(raw_data, variant)
     normalizers = {name: uint8_normalization_stats(image) for name, (image, _) in data.items()}
     model = UNet3DNNStyle(checkpoint["width"]).to(args.device)
     model.load_state_dict(checkpoint["model"])
+    model.eval()
 
     start = time.time()
     all_probability, all_truth = [], []
@@ -231,25 +255,34 @@ def main():
     section_results = []
     protocol_sections = {}
     for name, (image, labels) in data.items():
+        raw_image = raw_data[name][0]
+        display_stats = normalizers[name] if variant == "raw" else uint8_normalization_stats(raw_image)
         sample_probability, sample_truth = [], []
         protocol_sections[name] = list(args.sections)
         for z in args.sections:
-            probability, grid = stitch_section(
-                model, image, z, patch, args.stride_xy, normalizers[name], args.device
-            )
+            if args.full_xy:
+                z0 = min(max(z - patch[0] // 2, 0), image.shape[0] - patch[0])
+                slab = normalize_raw(np.array(image[z0:z0 + patch[0]]), normalizers[name])
+                probability = model(slab[None, None].to(args.device))[0, 0, z - z0].sigmoid().cpu().numpy()
+                grid = {"x_starts": [0], "y_starts": [0]}
+            else:
+                probability, grid = stitch_section(
+                    model, image, z, patch, args.stride_xy, normalizers[name], args.device, args.blend
+                )
             audit = np.asarray(labels[z]).copy()
             target, valid = arrays_from_labels(audit)
             truth = target.astype(bool)
             valid_probability = probability[valid]
             valid_truth = truth[valid]
             metrics = summarize(valid_probability, valid_truth, threshold)
-            seam = seam_diagnostic(probability, grid["y_starts"], grid["x_starts"])
+            seam = None if args.full_xy else seam_diagnostic(probability, grid["y_starts"], grid["x_starts"])
             section_results.append({"sample": name, "z": z, "metrics": metrics, "seam": seam, "grid": grid})
             sample_probability.append(valid_probability)
             sample_truth.append(valid_truth)
             save_composite(
                 assets / f"{name}_z{z:03d}_whole_section.png",
-                np.asarray(image[z]), audit, probability, threshold, normalizers[name], grid,
+                np.asarray(raw_image[z]), audit, probability, threshold, display_stats, grid,
+                image.shape[1:] if args.full_xy else patch[1:],
             )
         sample_probability = np.concatenate(sample_probability)
         sample_truth = np.concatenate(sample_truth)
@@ -257,7 +290,12 @@ def main():
         all_probability.append(sample_probability)
         all_truth.append(sample_truth)
 
-    aggregate = summarize(np.concatenate(all_probability), np.concatenate(all_truth), threshold)
+    pooled_probability = np.concatenate(all_probability)
+    pooled_truth = np.concatenate(all_truth)
+    aggregate = summarize(pooled_probability, pooled_truth, threshold)
+    if args.save_pr_scores:
+        np.savez_compressed(args.out / "pr_scores.npz", probability=pooled_probability,
+                            truth=pooled_truth, threshold=threshold)
     result = {
         "checkpoint_step": int(checkpoint["step"]),
         "locked_validation_threshold": threshold,
@@ -265,17 +303,24 @@ def main():
         "per_sample": per_sample,
         "per_section": section_results,
         "elapsed_seconds": time.time() - start,
-        "scope": "Fixed full-XY held-out sections with overlapping 3D sliding-window inference",
+        "scope": f"Fixed full-XY {args.split} sections",
     }
     protocol = {
         "run": str(args.run),
         "checkpoint": str(args.run / "best.pt"),
-        "test_samples": names,
+        "split": args.split,
+        "samples": names,
+        "preprocessing": variant,
+        "inference": "single full-XY forward pass" if args.full_xy else "overlapping 3D sliding window",
         "sections_by_sample": protocol_sections,
         "patch_zyx": list(patch),
-        "stride_xy": args.stride_xy,
-        "blend": "separable Hann window clipped to minimum weight 0.05",
-        "threshold_source": "frozen sample_09/10 validation threshold",
+        "stride_xy": None if args.full_xy else args.stride_xy,
+        "blend": None if args.full_xy else {
+            "hann": "separable Hann window clipped to minimum weight 0.05",
+            "uniform": "equal-weight average of overlapping probabilities",
+        }[args.blend],
+        "threshold_source": (str(args.threshold_from) if args.threshold_from else
+                             "frozen sample_09/10 validation-patch threshold"),
         "reuse_requirement": "Use these exact samples, Z sections, tiling, blending and scored-label mask for every run.",
     }
     (args.out / "result.json").write_text(json.dumps(result, indent=2) + "\n")

@@ -8,6 +8,8 @@ See [the pilot notes](docs/preprocessing_pilot.md) for methods and limitations.
 An exploratory partial-label 3D segmentation baseline, including whole-section
 visual results and its limitations, is documented in
 [the 3D baseline report](docs/astrocyte_3d_baseline.md).
+The paired-seed Raw and NLM results are in
+[the whole-section preprocessing comparison](docs/preprocessing_whole_sections.md).
 The original toolkit and its Git history are retained; these additions do not
 establish a validated mitochondria segmentation pipeline.
 

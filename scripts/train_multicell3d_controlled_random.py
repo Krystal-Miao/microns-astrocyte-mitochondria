@@ -45,23 +45,33 @@ def draw_random(data, rng, patch, kind):
     return extract_patch(image, labels, start, patch, name, kind)
 
 
+PREPROCESSING = {
+    "raw": None,
+    "clahe": {"kernel_size": (64, 64), "clip_limit": 0.01, "nbins": 256},
+    "nlm": {"h": 2 / 255, "patch_size": 5, "patch_distance": 6, "fast_mode": True,
+            "channel_axis": None, "sigma": 0.0, "preserve_range": True},
+}
+
+
 def preprocess_images(data, method):
-    """Return aligned uint8 images; CLAHE is applied to full XY planes before crops."""
+    """Transform full XY planes before cropping while preserving label alignment."""
     if method == "raw":
         return data
-    if method != "clahe":
+    if method == "clahe":
+        from skimage.exposure import equalize_adapthist as transform
+    elif method == "nlm":
+        from skimage.restoration import denoise_nl_means as transform
+    else:
         raise ValueError(f"Unknown preprocessing method: {method}")
-    from skimage.exposure import equalize_adapthist
     result = {}
     for name, (image, labels) in data.items():
         transformed = np.empty(image.shape, dtype=np.uint8)
         for z in range(image.shape[0]):
             plane = np.asarray(image[z], dtype=np.float32) / 255
-            processed = equalize_adapthist(
-                plane, kernel_size=(64, 64), clip_limit=0.01, nbins=256)
+            processed = transform(plane, **PREPROCESSING[method])
             transformed[z] = np.clip(np.rint(processed * 255), 0, 255).astype(np.uint8)
         result[name] = (transformed, labels)
-        print(f"preprocessed {name} with full-slice CLAHE", flush=True)
+        print(f"preprocessed {name} with full-slice {method}", flush=True)
     return result
 
 
@@ -75,7 +85,7 @@ def main():
     parser.add_argument("--patch-zyx", type=int, nargs=3, default=[16, 128, 128])
     parser.add_argument("--width", type=int, default=4)
     parser.add_argument("--eval-every", type=int, default=250)
-    parser.add_argument("--preprocessing", choices=["raw", "clahe"], default="raw")
+    parser.add_argument("--preprocessing", choices=PREPROCESSING, default="raw")
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=False)
     torch.set_num_threads(4); torch.manual_seed(args.seed)
@@ -149,9 +159,11 @@ def main():
               "sampling": "balanced shuffled cycles: foreground, uniform, neuron_hard_negative",
               "preprocessing_variant": args.preprocessing,
               "preprocessing_parameters": (None if args.preprocessing == "raw" else
-                  {"method": "skimage.exposure.equalize_adapthist", "scope": "full XY slice before crop",
+                  {"method": {"clahe": "skimage.exposure.equalize_adapthist",
+                              "nlm": "skimage.restoration.denoise_nl_means"}[args.preprocessing],
+                   "scope": "full XY slice before crop",
                    "input": "float32 uint8/255", "output": "rounded uint8",
-                   "kernel_size": [64, 64], "clip_limit": 0.01, "nbins": 256}),
+                   **PREPROCESSING[args.preprocessing]}),
               "augmentation": ["xy_rot90", "x_flip", "y_flip"],
               "normalization": "per-volume 0.5/99.5 percentile clipping and z-score",
               "architecture": "GroupNorm + LeakyReLU lightweight 3D U-Net",
